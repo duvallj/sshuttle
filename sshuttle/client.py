@@ -5,6 +5,7 @@ import time
 import subprocess as ssubprocess
 import sshuttle.helpers as helpers
 import os
+import ctypes
 import sshuttle.ssnet as ssnet
 import sshuttle.ssh as ssh
 import sshuttle.ssyslog as ssyslog
@@ -12,7 +13,7 @@ import sys
 import platform
 from sshuttle.ssnet import SockWrapper, Handler, Proxy, Mux, MuxWrapper
 from sshuttle.helpers import log, debug1, debug2, debug3, Fatal, islocal, \
-    resolvconf_nameservers
+    resolvconf_nameservers, admin_check, on_windows
 from sshuttle.methods import get_method, Features
 try:
     from pwd import getpwnam
@@ -76,11 +77,12 @@ def check_daemon(pidfile):
 
 
 def daemonize():
-    if os.fork():
-        os._exit(0)
-    os.setsid()
-    if os.fork():
-        os._exit(0)
+    if not _on_windows:
+        if os.fork():
+            os._exit(0)
+        os.setsid()
+        if os.fork():
+            os._exit(0)
 
     outfd = os.open(_pidname, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
     try:
@@ -108,6 +110,11 @@ def daemon_cleanup():
         else:
             raise
 
+def windows_quote(argument):
+    return '"' + \
+        argument.replace('"', '\\"')\
+                .replace('??', "\\??") \
+        + '"'
 
 class MultiListener:
 
@@ -215,27 +222,44 @@ class FirewallClient:
         def setup():
             # run in the child process
             s2.close()
-        e = None
-        if os.getuid() == 0:
-            argv_tries = argv_tries[-1:]  # last entry only
-        for argv in argv_tries:
-            try:
-                if argv[0] == 'su':
-                    sys.stderr.write('[local su] ')
-                self.p = ssubprocess.Popen(argv, stdout=s1, preexec_fn=setup)
-                e = None
-                break
-            except OSError as e:
-                pass
-        self.argv = argv
+        err = None
+        if on_windows:
+            if not admin_check():
+                print("Handing over execution to elevated subprocess")
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable,
+                        __file__ + ' '*(len(sys.argv) > 1) + ' '.join(map(windows_quote, sys.argv[1:])),
+                        None, 1)
+                self.p = None
+            else:
+                # always use base if we are already admin
+                self.p = ssubprocess.Popen(argv_tries[-1], stdout=ssubprocess.PIPE)
+                self.argv = argv_tries[-1]
+        else:
+            if admin_check():
+                argv_tries = argv_tries[-1:]  # last entry only
+            for argv in argv_tries:
+                try:
+                    if argv[0] == 'su':
+                        sys.stderr.write('[local su] ')
+                    else:
+                        self.p = ssubprocess.Popen(argv, stdout=s1, preexec_fn=setup)
+                    err = None
+                    break
+                except OSError as e:
+                    pass
+            self.argv = argv
         s1.close()
+
+        if self.p is None:
+            return
+
         if sys.version_info < (3, 0):
             # python 2.7
             self.pfile = s2.makefile('wb+')
         else:
             # python 3.5
             self.pfile = s2.makefile('rwb')
-        if e:
+        if err:
             log('Spawning firewall manager: %r\n' % self.argv)
             raise Fatal(e)
         line = self.pfile.readline()
@@ -260,11 +284,13 @@ class FirewallClient:
         self.user = user
 
     def check(self):
+        if self.p is None: return
         rv = self.p.poll()
         if rv:
             raise Fatal('%r returned %d' % (self.argv, rv))
 
     def start(self):
+        if self.p is None: return
         self.pfile.write(b'ROUTES\n')
         for (family, ip, width, fport, lport) \
                 in self.subnets_include + self.auto_nets:
@@ -303,12 +329,14 @@ class FirewallClient:
             raise Fatal('%r expected STARTED, got %r' % (self.argv, line))
 
     def sethostip(self, hostname, ip):
+        if self.p is None: return
         assert(not re.search(b'[^-\w\.]', hostname))
         assert(not re.search(b'[^0-9.]', ip))
         self.pfile.write(b'HOST %s,%s\n' % (hostname, ip))
         self.pfile.flush()
 
     def done(self):
+        if self.p is None: return
         self.pfile.close()
         rv = self.p.wait()
         if rv:
@@ -563,6 +591,7 @@ def main(listenip_v6, listenip_v4,
     debug1('Starting sshuttle proxy.\n')
 
     fw = FirewallClient(method_name, sudo_pythonpath)
+    if fw.p is None: return
 
     # Get family specific subnet lists
     if dns:

@@ -3,7 +3,7 @@ import importlib
 import socket
 import struct
 import errno
-from sshuttle.helpers import Fatal, debug3
+from sshuttle.helpers import Fatal, debug3, on_windows
 
 
 def original_dst(sock):
@@ -89,7 +89,7 @@ class BaseMethod(object):
 def _program_exists(name):
     paths = (os.getenv('PATH') or os.defpath).split(os.pathsep)
     for p in paths:
-        fn = '%s/%s' % (p, name)
+        fn = os.path.join(p, name)
         if os.path.exists(fn):
             return not os.path.isdir(fn) and os.access(fn, os.X_OK)
 
@@ -100,16 +100,23 @@ def get_method(method_name):
 
 
 def get_auto_method():
-    if _program_exists('iptables'):
-        method_name = "nat"
-    elif _program_exists('nft'):
-        method_name = "nft"
-    elif _program_exists('pfctl'):
-        method_name = "pf"
-    elif _program_exists('ipfw'):
-        method_name = "ipfw"
+    if on_windows:
+        if _program_exists("netsh.exe"):
+            method_name = "netsh"
+        else:
+            raise Fatal(
+                "can't find netsh.exe on your %PATH%, did you break something?")
     else:
-        raise Fatal(
-            "can't find either iptables, nft or pfctl; check your PATH")
+        if _program_exists('iptables'):
+            method_name = "nat"
+        elif _program_exists('nft'):
+            method_name = "nft"
+        elif _program_exists('pfctl'):
+            method_name = "pf"
+        elif _program_exists('ipfw'):
+            method_name = "ipfw"
+        else:
+            raise Fatal(
+                "can't find either iptables, nft or pfctl; check your PATH")
 
     return get_method(method_name)

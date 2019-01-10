@@ -7,7 +7,7 @@ import sys
 import os
 import platform
 import traceback
-from sshuttle.helpers import debug1, debug2, Fatal
+from sshuttle.helpers import debug1, debug2, Fatal, admin_check, on_windows
 from sshuttle.methods import get_auto_method, get_method
 
 HOSTSFILE = '/etc/hosts'
@@ -53,19 +53,25 @@ def restore_etc_hosts(port):
 
 # Isolate function that needs to be replaced for tests
 def setup_daemon():
-    if os.getuid() != 0:
+    if not admin_check():
         raise Fatal('you must be root (or enable su/sudo) to set the firewall')
 
     # don't disappear if our controlling terminal or stdout/stderr
     # disappears; we still have to clean up.
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if on_windows:
+        signal.signal(signal.SIGABRT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    else:
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # ctrl-c shouldn't be passed along to me.  When the main sshuttle dies,
     # I'll die automatically.
-    os.setsid()
+    if not on_windows:
+        os.setsid()
 
     # because of limitations of the 'su' command, the *real* stdin/stdout
     # are both attached to stdout initially.  Clone stdout into stdin so we

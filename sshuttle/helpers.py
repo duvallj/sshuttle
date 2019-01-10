@@ -1,6 +1,8 @@
 import sys
 import socket
 import errno
+import os
+import ctypes
 
 logprefix = ''
 verbose = 0
@@ -106,3 +108,12 @@ def family_to_string(family):
         return "AF_INET"
     else:
         return str(family)
+
+
+on_windows = os.name == 'nt'
+
+def admin_check():
+    if on_windows:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    else:
+        return os.getuid() == 0
