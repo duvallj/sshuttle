@@ -233,7 +233,7 @@ class FirewallClient:
                 self.p = None
             else:
                 # always use base if we are already admin
-                self.p = ssubprocess.Popen(argv_tries[-1], stdout=ssubprocess.PIPE)
+                self.p = ssubprocess.Popen(argv_tries[-1], stdout=ssubprocess.PIPE, stdin=ssubprocess.PIPE)
                 self.argv = argv_tries[-1]
         else:
             if admin_check():
@@ -263,11 +263,18 @@ class FirewallClient:
         if err:
             log('Spawning firewall manager: %r\n' % self.argv)
             raise Fatal(e)
+
+        if on_windows:
+            self.pfile.readline = self.p.stdout.readline
+            self.pfile.read = self.p.stdout.read
+            self.pfile.write = self.p.stdin.write
+            def _flush_both(): self.p.stdout.flush(); self.p.stdin.flush()
+            self.pfile.flush = _flush_both
         line = self.pfile.readline()
         self.check()
         if line[0:5] != b'READY':
             raise Fatal('%r expected READY, got %r' % (self.argv, line))
-        method_name = line[6:-1]
+        method_name = line[6:].strip()
         self.method = get_method(method_name.decode("ASCII"))
         self.method.set_firewall(self)
 

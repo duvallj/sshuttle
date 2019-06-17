@@ -74,10 +74,10 @@ def setup_daemon():
     if not on_windows:
         os.setsid()
 
-    # because of limitations of the 'su' command, the *real* stdin/stdout
-    # are both attached to stdout initially.  Clone stdout into stdin so we
-    # can read from it.
-    os.dup2(1, 0)
+        # because of limitations of the 'su' command, the *real* stdin/stdout
+        # are both attached to stdout initially.  Clone stdout into stdin so we
+        # can read from it.
+        os.dup2(1, 0)
 
     return sys.stdin, sys.stdout
 
