@@ -32,6 +32,14 @@ Obtaining sshuttle
 - Debian stretch or later::
 
       apt-get install sshuttle
+      
+- Arch Linux::
+
+      pacman --sync sshuttle
+
+- Fedora::
+
+      dnf install sshuttle
 
 - From PyPI::
 

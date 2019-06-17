@@ -3,14 +3,15 @@ import re
 import signal
 import time
 import subprocess as ssubprocess
-import sshuttle.helpers as helpers
 import os
 import ctypes
+import sys
+import platform
+
+import sshuttle.helpers as helpers
 import sshuttle.ssnet as ssnet
 import sshuttle.ssh as ssh
 import sshuttle.ssyslog as ssyslog
-import sys
-import platform
 from sshuttle.ssnet import SockWrapper, Handler, Proxy, Mux, MuxWrapper
 from sshuttle.helpers import log, debug1, debug2, debug3, Fatal, islocal, \
     resolvconf_nameservers, admin_check, on_windows
@@ -294,11 +295,13 @@ class FirewallClient:
         self.pfile.write(b'ROUTES\n')
         for (family, ip, width, fport, lport) \
                 in self.subnets_include + self.auto_nets:
-            self.pfile.write(b'%d,%d,0,%s,%d,%d\n'
-                    % (family, width, ip.encode("ASCII"), fport, lport))
+            self.pfile.write(b'%d,%d,0,%s,%d,%d\n' % (family, width,
+                                                      ip.encode("ASCII"),
+                                                      fport, lport))
         for (family, ip, width, fport, lport) in self.subnets_exclude:
-            self.pfile.write(b'%d,%d,1,%s,%d,%d\n'
-                    % (family, width, ip.encode("ASCII"), fport, lport))
+            self.pfile.write(b'%d,%d,1,%s,%d,%d\n' % (family, width,
+                                                      ip.encode("ASCII"),
+                                                      fport, lport))
 
         self.pfile.write(b'NSLIST\n')
         for (family, ip) in self.nslist:
@@ -481,7 +484,8 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename,
             stderr=ssyslog._p and ssyslog._p.stdin,
             options=dict(latency_control=latency_control,
                          auto_hosts=auto_hosts,
-                         to_nameserver=to_nameserver))
+                         to_nameserver=to_nameserver,
+                         auto_nets=auto_nets))
     except socket.error as e:
         if e.args[0] == errno.EPIPE:
             raise Fatal("failed to establish ssh session (1)")
@@ -522,7 +526,8 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename,
     def onroutes(routestr):
         if auto_nets:
             for line in routestr.strip().split(b'\n'):
-                if not line: continue
+                if not line:
+                    continue
                 (family, ip, width) = line.split(b',', 2)
                 family = int(family)
                 width = int(width)
@@ -626,8 +631,13 @@ def main(listenip_v6, listenip_v4,
         except KeyError:
             raise Fatal("User %s does not exist." % user)
 
-    required.ipv6 = len(subnets_v6) > 0 or listenip_v6 is not None
-    required.ipv4 = len(subnets_v4) > 0 or listenip_v4 is not None
+    if fw.method.name != 'nat':
+        required.ipv6 = len(subnets_v6) > 0 or listenip_v6 is not None
+        required.ipv4 = len(subnets_v4) > 0 or listenip_v4 is not None
+    else:
+        required.ipv6 = None
+        required.ipv4 = None
+
     required.udp = avail.udp
     required.dns = len(nslist) > 0
     required.user = False if user is None else True
@@ -735,7 +745,8 @@ def main(listenip_v6, listenip_v4,
         ports = range(12300, 9000, -1)
         for port in ports:
             debug2(' %d' % port)
-            if port in used_ports: continue
+            if port in used_ports:
+                continue
 
             dns_listener = MultiListener(socket.SOCK_DGRAM)
 
